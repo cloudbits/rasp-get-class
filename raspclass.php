@@ -12,27 +12,27 @@ class RASPForecast
 {
 	// property declarations
 	const gTurnpointFile = "turnpoints.dat";	// This is used to find a Lat/Long to a BGA turnpoint
-	const sINIFile = "config.ini";				// This is the configuration file name for the class
-	private $gGetLocatorCoords = FALSE;			// Flag used to process if using TP or I/J
-	private	$bDebugMode = FALSE;				// Debug flag - if true all the debug text is printed
+	const sINIFile = "config.ini";			// This is the configuration file name for the class
+	private $gGetLocatorCoords = FALSE;		// Flag used to process if using TP or I/J
+	private	$bDebugMode = FALSE;			// Debug flag - if true all the debug text is printed
 	
-	private	$gParsePtStart = 2;					// default start parse point in the RASP output line
-	private	$gParsePtEnd = 22;					// we use this to split the data out - whether starting at 07:00 or 06:00
-												// this is the end point (of the string)
-	private $gRes= "12km";						// default processing resolution
-	private $gCubase = 'temp'; 					// default to calculate the cloudbase (or not)
-	private $gDay = 'UK4'; 						// default model to search for is today
+	private	$gParsePtStart = 2;			// default start parse point in the RASP output line
+	private	$gParsePtEnd = 22;			// we use this to split the data out - whether starting at 07:00 or 06:00
+							// this is the end point (of the string)
+	private $gRes= "12km";				// default processing resolution
+	private $gCubase = 'temp'; 			// default to calculate the cloudbase (or not)
+	private $gDay = 'UK4'; 				// default model to search for is today
 
-	protected $gTurnpoint = "<empty>";			// The next few data items are the placeholders
-	protected $gLat = "<empty>";				// used by the class for processing
-	protected $gLong = "<empty>";				// these get filled if the processing works correctly
-	protected $gTPName = "<empty>";				
-	protected $gGrid_i = "1332";				// default "i"
-	protected $gGrid_k = "1547";				// default "k"
-	protected $gArchiveDate = "<empty>";
-	public $gServer = "stratus";				// default server source
+	public $gTurnpoint = "<empty>";			// The next few data items are the placeholders
+	public $gLat = "<empty>";			// used by the class for processing
+	public $gLong = "<empty>";			// these get filled if the processing works correctly
+	public $gTPName = "<empty>";			// filled in if there is a turn point name
+	public $gGrid_i = "1332";			// default "i"
+	public $gGrid_k = "1547";			// default "k"
+	public $gArchiveDate = "<empty>";
+	public $gServer = "stratus";			// default server source
 	
-	public $gSource = "<empty>";				// where we store pulled results - read only
+	public $gSource = "<empty>";			// where we store pulled results - read only
 	public $headertime = "<empty>";
 	public $dateline = "<empty>";
 	public $gridline = "<empty>";
@@ -55,8 +55,9 @@ class RASPForecast
 	public $rain = "<empty>";
 	
 	public $gaResults = "";					// This is the global array array of returned results ($ga)
+	public $tTime_start = "<empty>";	// when we started doing stuff
 
-	private $g_url_front = "<empty>";	// 193.113.58.173 = www.mrs.labs.bt.com / www.mrs.bt.co.uk
+	private $g_url_front = "<empty>";	// 193.113.58.173 = wx.mrs.bt.co.uk
 	private	$g_url_back = "<empty>";
 
 	private	$gModelData="";
@@ -69,6 +70,12 @@ class RASPForecast
 	private	$gHighest_Y = 0;
 
 	private $ini_array = "";			// This holds the configuration from the INI file
+	const ONE_KNOT_TO_MPH = 1.15077944802354;	// for conversion from knots to Miles PH
+	const ONE_KNOT_TO_KPH = 1.852; 				// for conversion from knots to Kilometers PH
+	
+	// Now some conversions in case we need them
+	const ONE_MPH_TO_KNOT = 0.8689762419006498;	// 1 / 1.15077944802354
+	const ONE_KPH_TO_KNOT = 0.5399568034557235; 	// 1 / 1.852
 	
 // -------------------------------------------------------------------------------------
 	private function my_str_split($string,$string_length=1) 
@@ -263,7 +270,10 @@ class RASPForecast
 		// Now go and get the data 		
 		// BLIPSPOT:  14 Sep 2009
 		// UK12 d2 gridpt= 47,18
-		// Lat,Lon= 52.18756,0.95882		
+		// Lat,Lon= 52.18756,0.95882
+	
+		// just keep a copy of when we go off to pull data so we can time ourselves
+		$this->tTime_start = microtime(true);
 		
 		$file = fopen ($this->gSource, "r");
 		usleep(500);
@@ -820,9 +830,219 @@ class RASPForecast
 		}
 		return $result;
 	}
-
 #------------------------------------------------------------------------------
+	// This function will return rain for the forecast period
+	public function GetTotalRain()
+	{
+		return $fTotalRain = array_sum($this->gaResults[ "rain" ]);
+	}
+#------------------------------------------------------------------------------
+	// This function will print out al lthe contents of this instance
+	public function PrintEverything()
+	{
+		echo "<pre>";		// assume looking at results in a browser
+		print_r($this);
+		echo "</pre>";
+	}
+#------------------------------------------------------------------------------
+	// This function will return maximum for the forecast period for the type
+	public function GetMax($sType)
+	{
+		return max($this->gaResults[ $sType ] );
+	}
+#------------------------------------------------------------------------------
+	// This function will return maximum wind speed/dir for the forecast period 
+	// for the type given - which can be surface or upper
+	public function GetMaxWindSpeedDir($sInputType)
+	{
+		// decide what type we are
+		if ($sInputType == "" ){ //if no type given, then assume surface
+			$sType = "surface_wind_speed";
+			$sDirType = "surface_wind_dir";
+		} elseif (strtolower($sInputType) == "surface_wind_speed")	{
+				$sType = "surface_wind_speed";
+				$sDirType = "surface_wind_dir";
+		} elseif (strtolower($sInputType) == "upper_wind_speed") {
+			$sType = "upper_wind_speed";
+			$sDirType = "upper_wind_dir";
+		} else { // default to surface
+			$sType = "surface_wind_speed";
+			$sDirType = "surface_wind_dir";
+		}
+		
+		// iterate through the results and find the highest speed and make a note of the time period
+		// which is in the [headertime] array - note that if the speed is the same morethan once, 
+		// we simply use the last occurence as that's good enough for a basic view
+		$iTimePtr = "";
+		$fMax = -99;
+		for ($iLoop = 0; $iLoop < count($this->gaResults[ $sType ]); $iLoop++)
+		{
+			if ($this->gaResults[ $sType ][$iLoop] > $fMax) {
+				$fMax = $this->gaResults[ $sType ][$iLoop]; // set this to new maximum
+				$sTime = $this->gaResults[ "headertime" ][$iLoop]; // make a note of which item it is
+				$iTimePtr = $iLoop; 
+			}
+		}
+		// now we have the time, go and find the direction - in degrees
+		$iMaxDir = $this->gaResults[ $sDirType ][$iTimePtr];
+		
+		// we return an array "triple" of wind speed, direction and time
+		return array ($fMax, $iMaxDir, $sTime);
+	}
+#------------------------------------------------------------------------------
+	// This function will return the date as "DD MM YYYY" or
+	// what is in the fields if not these
+	public function GetDateOfForecast()
+	{
+		$sForecastDate = $this->gaResults["dateline"][ 0 ];
+		$sForecastDate .= " ".$this->gaResults["dateline"][ 1 ];
+		$sForecastDate .= " ".$this->gaResults["dateline"][ 2 ];
+		// snip off any printing chars, just in case they sneak in
+		return ltrim(rtrim($sForecastDate));
+	}
+#------------------------------------------------------------------------------	
+	// This function will return a text direction for an input bearing
+	public function ResolveWindDirection( $sWindDegrees )
+	{
+		$wind_dir = $sWindDegrees;
+			# Cardinal Direction    Degree Direction
+			#N      348.75 - 11.25
+			#NNE    11.25 - 33.75
+			#NE     33.75 - 56.25
+			#ENE    56.25 - 78.75
+			#E      78.75 - 101.25
+			#ESE    101.25 - 123.75
+			#SE     123.75 - 146.25
+			#SSE    146.25 - 168.75
+			#S      168.75 - 191.25
+			#SSW    191.25 - 213.75
+			#SW     213.75 - 236.25
+			#WSW    236.25 - 258.75
+			#W      258.75 - 281.25
+			#WNW    281.25 - 303.75
+			#NW     303.75 - 326.25
+			#NNW    326.25 - 348.75
 
+		if ( (($wind_dir >= 348) && ($wind_dir <= 359))||(($wind_dir >= 0) && ($wind_dir <= 11)) ) {
+			#N      348.75 - 11.25
+			$wind_ind = "N";
+		} elseif ( (($wind_dir >= 12) && ($wind_dir <= 33)) ) {
+			#NNE    11.25 - 33.75
+			$wind_ind = "NNE";
+		} elseif ( (($wind_dir >= 34) && ($wind_dir <= 56)) ) {
+			#NE     33.75 - 56.25
+			$wind_ind = "NE";
+		} elseif ( (($wind_dir >= 57) && ($wind_dir <= 78)) ) {
+			#ENE    56.25 - 78.75
+			$wind_ind = "ENE";
+		} elseif ( (($wind_dir >= 79) && ($wind_dir <= 101)) ) {
+			#E      78.75 - 101.25
+			$wind_ind = "E";
+		} elseif ( (($wind_dir >= 102) && ($wind_dir <= 146)) ) {
+			#SE     123.75 - 146.25
+			$wind_ind = "SE";
+		} elseif ( (($wind_dir >= 147) && ($wind_dir <= 168)) ) {
+			#SSE    146.25 - 168.75
+			$wind_ind = "SSE";
+		} elseif ( (($wind_dir >= 169) && ($wind_dir <= 191)) ) {
+			#S      168.75 - 191.25
+			$wind_ind = "S";
+		} elseif ( (($wind_dir >= 192) && ($wind_dir <= 213)) ) {
+			#SSW    191.25 - 213.75
+			$wind_ind = "SSW";
+		} elseif ( (($wind_dir >= 214) && ($wind_dir <= 258)) ) {
+			#WSW    236.25 - 258.75
+			$wind_ind = "WSW";
+		} elseif ( (($wind_dir >= 259) && ($wind_dir <= 281)) ) {
+			#W      258.75 - 281.25
+			$wind_ind = "W";
+		} elseif ( (($wind_dir >= 282) && ($wind_dir <= 303)) ) {
+			#WNW    281.25 - 303.75
+			$wind_ind = "WNW";
+		} elseif ( (($wind_dir >= 304) && ($wind_dir <= 326)) ) {
+			#NW     303.75 - 326.25
+			$wind_ind = "NW";
+		} elseif ( (($wind_dir >= 327) && ($wind_dir <= 347)) ) {
+			#NNW    326.25 - 348.75
+			$wind_ind = "NNW";
+		} else {
+			# do nothing
+			$wind_ind ="";
+		}
+			
+		return $wind_ind;
+	}
+#------------------------------------------------------------------------------
+	public function CheckResolution( $sResolution )
+	{
+		// now set a resolution - we need this to do sums later
+		if ($sResolution == "") {
+			$sRes= "4km";			// default to 4Km
+		} else {
+			switch (strtoupper($sResolution)){
+				case "12KM":
+					$sRes = "12Km";
+					break;
+				case "4KM":
+					$sRes = "4Km";
+					break;
+				case "2KM":
+					$sRes = "2Km";
+					break;				
+				default:
+					$sRes = "4km";	// default to this for today/tomorrow
+					echo "RASP model Resolution '$sResolution' not usable. Use 12Km/4Km/2Km";
+					exit(1);
+					break;
+			}
+		}
+		return $sRes;
+	}
+#------------------------------------------------------------------------------	
+	public function CheckTurnpoint( $sTurnpoint )
+	{
+		// just use 4Km - only interested in if turnpoint found
+		list ($a, $b, $c, $d, $e, $f) = $this->TurnPointDetails($sTurnpoint, "4Km"); 	
+		
+		if ($b > 90){ // >90 means the latitude is not found so neither is the TP
+			echo "BGA Turnpoint '$sTurnpoint' not found. Use something like LAS";
+			exit(1);
+		}
+		return $sTurnpoint; // return the same thing if we are found
+	}
+#------------------------------------------------------------------------------
+	// This function will print a basic report in HTML - useful for tests
+	public function PrintBasicTextResults()
+	{
+		echo "<pre>";
+		$iHighestTemp = $this->GetMax("temp");
+		$fTotalRain = $this->GetTotalRain();
+		$iHighestWindSpd = round($this->GetMax("surface_wind_speed") * self::ONE_KNOT_TO_MPH); // MPH
+	
+		$sForecastDate = $this->GetDateOfForecast();
+		echo "Date: $sForecastDate";
+	
+		$sForecastLatLong = $this->gLat." ".$this->gLong;
+		echo "<br>Lat/Long: $sForecastLatLong";
+	
+		echo "<br>Forecast Max Surface Temp: $iHighestTemp &degC";
+		echo "<br>Forecast Rainfall today: $fTotalRain mm";
+		echo "<br>Forecast Max Surface Wind: $iHighestWindSpd MPH";
+	
+		list( $fHighestWindSpd2, $iDir, $sTime ) = $this->GetMaxWindSpeedDir("surface_wind_speed");
+		$sStrDir = $this->ResolveWindDirection($iDir);
+		echo "<br>Or wind speed as $fHighestWindSpd2 knots from $iDir&deg ($sStrDir) at $sTime hours";
+	
+		$tTime_end = microtime(true);
+		$fTimeTaken = round($tTime_end - $this->tTime_start,2);
+		$sFooter = "This data retrieved ".date('d/m/y H:i:s')." in ".$fTimeTaken." secs from ".$this->gServer;	
+		echo "<p>$sFooter";
+		echo "</pre>";
+	
+		// You can dump all the contents if you like ...
+		// $this->PrintEverything();
+	}
+
+#------------------------------------------------------------------------------	
 } // end class
 ?>
-
