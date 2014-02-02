@@ -20,4 +20,10 @@ This file provides BGA turnpoint information so that a textual three character p
 The class itself. The comments document what it does. For usage information look at the two examples.
 
 
+(4) Testing The class
 
+Assuming you have a local CLI version of PHP (i.e. php-cli or php-cgi), you can test the class from the command line using: 
+
+"php-cli txtfcst.php tp=LAS res=4Km"
+
+The output should preovide some html of forecast information. If you cannot use a local (shell-based) php invocation, try running as 
