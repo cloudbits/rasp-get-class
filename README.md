@@ -1,7 +1,7 @@
 rasp-get-class
 ==============
 
-PHP Class for pulling RASP Weather data
+PHP Class for pulling RASP Weather data - see http://rasp.stratus.org.uk for more about "RASP".
 
 There are two enclosed applications to create a textual output of a lat/long and a PNG image.
 
@@ -9,7 +9,7 @@ Files:
 
 (1) config.ini
 
-This is used to turn debugging on and off, maintenance mode is to permit all uses (incase something upstream is broken)
+This is used to turn debugging on and off, maintenance mode is to permit all use (in case something upstream is broken)
 
 (2) turnpoints.dat
 
