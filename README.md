@@ -26,4 +26,4 @@ Assuming you have a local CLI version of PHP (i.e. php-cli or php-cgi), you can 
 
 "php-cli txtfcst.php tp=LAS res=4Km"
 
-The output should preovide some html of forecast information. If you cannot use a local (shell-based) php invocation, try running as 
+The output should provide some HTML of forecast information. If you cannot use a local (shell-based) php invocation, try running as 
